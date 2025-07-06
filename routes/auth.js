@@ -1,9 +1,17 @@
 var express = require('express');
 var passport = require('passport');
 var LocalStrategy = require('passport-local');
-var crypto = require('crypto');
-var db = require('../db');
+// crypto is no longer needed
+// var db = require('../db'); // db is no longer needed
 
+// Hardcoded users
+const users = [
+  { id: 1, username: 'user1', password: 'password1' },
+  { id: 2, username: 'user2', password: 'password2' },
+  { id: 3, username: 'user3', password: 'password3' },
+  { id: 4, username: 'user4', password: 'password4' },
+  { id: 5, username: 'user5', password: 'password5' }
+];
 
 /* Configure password authentication strategy.
  *
@@ -11,24 +19,15 @@ var db = require('../db');
  * The strategy parses the username and password from the request and calls the
  * `verify` function.
  *
- * The `verify` function queries the database for the user record and verifies
- * the password by hashing the password supplied by the user and comparing it to
- * the hashed password stored in the database.  If the comparison succeeds, the
- * user is authenticated; otherwise, not.
+ * The `verify` function now checks against the hardcoded list of users.
  */
 passport.use(new LocalStrategy(function verify(username, password, cb) {
-  db.get('SELECT * FROM users WHERE username = ?', [ username ], function(err, row) {
-    if (err) { return cb(err); }
-    if (!row) { return cb(null, false, { message: 'Incorrect username or password.' }); }
-    
-    crypto.pbkdf2(password, row.salt, 310000, 32, 'sha256', function(err, hashedPassword) {
-      if (err) { return cb(err); }
-      if (!crypto.timingSafeEqual(row.hashed_password, hashedPassword)) {
-        return cb(null, false, { message: 'Incorrect username or password.' });
-      }
-      return cb(null, row);
-    });
-  });
+  const user = users.find(u => u.username === username && u.password === password);
+  if (user) {
+    // Important: The user object passed to cb must have an `id` property for serialization
+    return cb(null, { id: user.id, username: user.username });
+  }
+  return cb(null, false, { message: 'Incorrect username or password.' });
 }));
 
 /* Configure session management.
@@ -134,47 +133,6 @@ router.post('/logout', function(req, res, next) {
   });
 });
 
-/* GET /signup
- *
- * This route prompts the user to sign up.
- *
- * The 'signup' view renders an HTML form, into which the user enters their
- * desired username and password.  When the user submits the form, a request
- * will be sent to the `POST /signup` route.
- */
-router.get('/signup', function(req, res, next) {
-  res.render('signup');
-});
-
-/* POST /signup
- *
- * This route creates a new user account.
- *
- * A desired username and password are submitted to this route via an HTML form,
- * which was rendered by the `GET /signup` route.  The password is hashed and
- * then a new user record is inserted into the database.  If the record is
- * successfully created, the user is logged in.
- */
-router.post('/signup', function(req, res, next) {
-  var salt = crypto.randomBytes(16);
-  crypto.pbkdf2(req.body.password, salt, 310000, 32, 'sha256', function(err, hashedPassword) {
-    if (err) { return next(err); }
-    db.run('INSERT INTO users (username, hashed_password, salt) VALUES (?, ?, ?)', [
-      req.body.username,
-      hashedPassword,
-      salt
-    ], function(err) {
-      if (err) { return next(err); }
-      var user = {
-        id: this.lastID,
-        username: req.body.username
-      };
-      req.login(user, function(err) {
-        if (err) { return next(err); }
-        res.redirect('/');
-      });
-    });
-  });
-});
+// Signup routes are removed.
 
 module.exports = router;
