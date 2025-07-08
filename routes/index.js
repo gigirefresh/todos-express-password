@@ -1,10 +1,21 @@
 var express = require('express');
-var ensureLogIn = require('connect-ensure-login').ensureLoggedIn;
 var db = require('../db');
 
-var ensureLoggedIn = ensureLogIn();
+// Custom middleware to ensure user is logged in
+function customEnsureLoggedIn(req, res, next) {
+  if (!req.user) {
+    return res.redirect('/login');
+  }
+  next();
+}
 
 function fetchTodos(req, res, next) {
+  // Ensure req.user exists before trying to access req.user.id
+  if (!req.user || typeof req.user.id === 'undefined') {
+    // This case should ideally be caught by customEnsureLoggedIn,
+    // but as a safeguard, especially if fetchTodos is used elsewhere without it:
+    return res.redirect('/login');
+  }
   db.all('SELECT * FROM todos WHERE owner_id = ?', [
     req.user.id
   ], function(err, rows) {
@@ -36,19 +47,19 @@ router.get('/', function(req, res, next) {
   res.render('index', { user: req.user });
 });
 
-router.get('/active', ensureLoggedIn, fetchTodos, function(req, res, next) {
+router.get('/active', customEnsureLoggedIn, fetchTodos, function(req, res, next) {
   res.locals.todos = res.locals.todos.filter(function(todo) { return !todo.completed; });
   res.locals.filter = 'active';
   res.render('index', { user: req.user });
 });
 
-router.get('/completed', ensureLoggedIn, fetchTodos, function(req, res, next) {
+router.get('/completed', customEnsureLoggedIn, fetchTodos, function(req, res, next) {
   res.locals.todos = res.locals.todos.filter(function(todo) { return todo.completed; });
   res.locals.filter = 'completed';
   res.render('index', { user: req.user });
 });
 
-router.post('/', ensureLoggedIn, function(req, res, next) {
+router.post('/', customEnsureLoggedIn, function(req, res, next) {
   req.body.title = req.body.title.trim();
   next();
 }, function(req, res, next) {
@@ -65,7 +76,7 @@ router.post('/', ensureLoggedIn, function(req, res, next) {
   });
 });
 
-router.post('/:id(\\d+)', ensureLoggedIn, function(req, res, next) {
+router.post('/:id(\\d+)', customEnsureLoggedIn, function(req, res, next) {
   req.body.title = req.body.title.trim();
   next();
 }, function(req, res, next) {
@@ -89,7 +100,7 @@ router.post('/:id(\\d+)', ensureLoggedIn, function(req, res, next) {
   });
 });
 
-router.post('/:id(\\d+)/delete', ensureLoggedIn, function(req, res, next) {
+router.post('/:id(\\d+)/delete', customEnsureLoggedIn, function(req, res, next) {
   db.run('DELETE FROM todos WHERE id = ? AND owner_id = ?', [
     req.params.id,
     req.user.id
@@ -99,7 +110,7 @@ router.post('/:id(\\d+)/delete', ensureLoggedIn, function(req, res, next) {
   });
 });
 
-router.post('/toggle-all', ensureLoggedIn, function(req, res, next) {
+router.post('/toggle-all', customEnsureLoggedIn, function(req, res, next) {
   db.run('UPDATE todos SET completed = ? WHERE owner_id = ?', [
     req.body.completed !== undefined ? 1 : null,
     req.user.id
@@ -109,7 +120,7 @@ router.post('/toggle-all', ensureLoggedIn, function(req, res, next) {
   });
 });
 
-router.post('/clear-completed', ensureLoggedIn, function(req, res, next) {
+router.post('/clear-completed', customEnsureLoggedIn, function(req, res, next) {
   db.run('DELETE FROM todos WHERE owner_id = ? AND completed = ?', [
     req.user.id,
     1

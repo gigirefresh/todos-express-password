@@ -1,62 +1,29 @@
 var express = require('express');
-var passport = require('passport');
-var LocalStrategy = require('passport-local');
-// crypto is no longer needed
-// var db = require('../db'); // db is no longer needed
+var crypto = require('crypto'); // Needed for generating session IDs
+
+// We need to access the sessions object from app.js.
+// This is a simplification for teaching. In a larger app, you might use a shared module or context.
+// For now, we'll assume `sessions` is available via `req.app.locals` or pass it around.
+// However, the simplest way for this refactor is to make it a global in app.js and require app.js here,
+// or re-declare it here if we want to keep routes/auth.js fully independent of app.js internals.
+// Let's try to get it from app.js. This is a bit of a hack for this structure.
+// A better way would be to initialize sessions in a separate module and import it in both files.
+
+// For simplicity in this educational refactor, we will rely on the `sessions` object
+// being globally available from where app.js defined it.
+// This is not best practice for larger applications.
+// const sessions = require('../app').sessions; // This creates a circular dependency if app requires auth.
+// So, we will have to pass `sessions` from `app.js` or make it accessible globally.
+// The middleware in app.js already handles attaching `req.session`.
 
 // Hardcoded users
 const users = [
-  { id: 1, username: 'user1', password: 'password1' },
+  { id: 1, username: 'user1', password: 'password1' }, // Plain text passwords for teaching
   { id: 2, username: 'user2', password: 'password2' },
   { id: 3, username: 'user3', password: 'password3' },
   { id: 4, username: 'user4', password: 'password4' },
   { id: 5, username: 'user5', password: 'password5' }
 ];
-
-/* Configure password authentication strategy.
- *
- * The `LocalStrategy` authenticates users by verifying a username and password.
- * The strategy parses the username and password from the request and calls the
- * `verify` function.
- *
- * The `verify` function now checks against the hardcoded list of users.
- */
-passport.use(new LocalStrategy(function verify(username, password, cb) {
-  const user = users.find(u => u.username === username && u.password === password);
-  if (user) {
-    // Important: The user object passed to cb must have an `id` property for serialization
-    return cb(null, { id: user.id, username: user.username });
-  }
-  return cb(null, false, { message: 'Incorrect username or password.' });
-}));
-
-/* Configure session management.
- *
- * When a login session is established, information about the user will be
- * stored in the session.  This information is supplied by the `serializeUser`
- * function, which is yielding the user ID and username.
- *
- * As the user interacts with the app, subsequent requests will be authenticated
- * by verifying the session.  The same user information that was serialized at
- * session establishment will be restored when the session is authenticated by
- * the `deserializeUser` function.
- *
- * Since every request to the app needs the user ID and username, in order to
- * fetch todo records and render the user element in the navigation bar, that
- * information is stored in the session.
- */
-passport.serializeUser(function(user, cb) {
-  process.nextTick(function() {
-    cb(null, { id: user.id, username: user.username });
-  });
-});
-
-passport.deserializeUser(function(user, cb) {
-  process.nextTick(function() {
-    return cb(null, user);
-  });
-});
-
 
 var router = express.Router();
 
@@ -116,21 +83,52 @@ router.get('/login', function(req, res, next) {
  *       "302":
  *         description: Redirect.
  */
-router.post('/login/password', passport.authenticate('local', {
-  successReturnToOrRedirect: '/',
-  failureRedirect: '/login',
-  failureMessage: true
-}));
+router.post('/login/password', function(req, res, next) {
+  const { username, password } = req.body;
+  const user = users.find(u => u.username === username && u.password === password);
+
+  if (user) {
+    const sessionId = crypto.randomBytes(16).toString('hex');
+    // We need to access the global `sessions` object defined in app.js
+    // This is a simplification for this educational context.
+    // `sessions` should ideally be managed in a way that doesn't rely on global scope implicitly.
+    // For now, we assume app.js has made `sessions` available.
+    // A better approach: req.app.locals.sessions = sessions; in app.js
+    // Then here: const sessions = req.app.locals.sessions;
+    // Let's modify app.js to make sessions available via req.app.locals
+
+    const appSessions = req.app.get('sessions'); // Get sessions from app.locals
+
+    appSessions[sessionId] = { user: { id: user.id, username: user.username } };
+
+    res.setHeader('Set-Cookie', `sessionId=${sessionId}; HttpOnly; Path=/; Max-Age=${60 * 60 * 24 * 7}`); // Max-Age for 1 week
+    // successReturnToOrRedirect behavior:
+    // For simplicity, we'll just redirect to '/'
+    // The original `successReturnToOrRedirect` might use `req.session.returnTo`
+    // which was managed by passport. We are not replicating that part for simplicity.
+    res.redirect('/');
+  } else {
+    // failureRedirect and failureMessage behavior:
+    // Redirect to login, perhaps with a query param for the message
+    // For simplicity, just redirecting.
+    // To pass a message, you could do: res.redirect('/login?error=1');
+    // And then in the GET /login route, check for this query param.
+    res.redirect('/login');
+  }
+});
 
 /* POST /logout
  *
  * This route logs the user out.
  */
 router.post('/logout', function(req, res, next) {
-  req.logout(function(err) {
-    if (err) { return next(err); }
-    res.redirect('/');
-  });
+  const sessionId = req.cookies.sessionId;
+  if (sessionId) {
+    const appSessions = req.app.get('sessions'); // Get sessions from app.locals
+    delete appSessions[sessionId];
+    res.setHeader('Set-Cookie', 'sessionId=; HttpOnly; Path=/; Expires=' + new Date(0).toUTCString());
+  }
+  res.redirect('/');
 });
 
 // Signup routes are removed.
